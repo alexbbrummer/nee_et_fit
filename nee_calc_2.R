@@ -1,4 +1,4 @@
-nee.calc <- function(){
+nee_calc <- function(){
   ## This version is from 11/3/16, it is the only NEE fitting code I have that includes the AIC test.  Copy those lines and paste into China (Inge, Claire, Sun) and RMBL (Lorah) files.  Check to see if current version will fail on china 2016 data.  If so, then next comment must be incorporated regarding summary statement, and error control must be improved.
   ## Additional needed corrections are...printing summary statement during crash to prevent complete analysis restart.
   ##This function is meant to perform the linear and non-linear fitting to nee data.  It will produce a plot of the data, queery the user if they would like to modify the time interval over which the data is fit, then print the paste statement of data values.  Currently, the function is written so that it works for a given filename.  From there, we can extend to a folder/directory.
@@ -14,30 +14,30 @@ nee.calc <- function(){
   
   ## Define directory as an object that contains the dir() item names as a vector.
   directory <- dir()
-  
-  ## For reading the .txt files, replace the ".txt" paste with ".txt"
-#   photo.names <- directory[grep(paste("[0-9]", ".txt", sep = ""), dir(), ignore.case = TRUE, value = FALSE)]
-#   ambient.names <- directory[grep(paste("[0-9]", "a", ".txt", sep = ""), dir(), ignore.case = TRUE, value = FALSE)]
-#   resp.names <- directory[grep("resp", dir(), ignore.case = TRUE, value = FALSE)]
 
+  ## Identify all file names corresponding to photosynthesis and respiration measurements
   photo.names <- grep("[^resp].txt", grep("[^_a]\\.txt", dir(), value = TRUE), value = TRUE)
   ambient.names <- grep("a.txt", dir(), value = TRUE)
-  resp.names <- grep("_[[:digit:]]resp.txt", dir(), value = TRUE)
+  resp.names <- grep("resp", dir(), value = TRUE)
   
   nee.fit <- function(filename){
     ## For reading the .txt files, replace read.csv with read.table, and add a skip = 9 parameter to the function.
     input <- read.table(filename, header = FALSE, skip = 9)
-    ## For reading the .txt files, these input subsetting commands may not be necessary.
-#     input <- input[-1,]
-#     input <- input[,-1]
-    
-    if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
-      ambient <- read.table(paste(strsplit(filename, "resp.txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
-    } else{
-      ambient <- read.table(paste(strsplit(filename, ".txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+
+    ## If statement to load ambient file if measurement was made (2006 and on) or to calculate ambient from the first five seconds of the photosyntheis/respriation measurement (2003-2006)
+    if(length(ambient.names) >= 1){
+      if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
+        ambient <- read.table(paste(strsplit(filename, "resp.txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+      }else if(length(grep("photo", filename, ignore.case = TRUE, value = FALSE)) == 1){
+        ambient <- read.table(paste(strsplit(filename, "photo.txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+      }else{
+        ambient <- read.table(paste(strsplit(filename, ".txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+      }
+    }else{
+      # grab first five rows of input file for ambient, keep all columns to use same averaging code below for wamb measure.
+      ambient <- input[1:5,]
     }
-#     ambient <- ambient[,-1]
-#     ambient <- ambient[-1,]
+    
     
     #  /// define constants - for Enquist Tent///
     vol = 2.197   # m^3, tent volume
@@ -148,18 +148,93 @@ nee.calc <- function(){
     
     ## nee_lm formula produces a negative value of nee_lm, but we are interested in PLANT uptake, so the minus sign must be coerced to positive when saving the values to spreadsheet via the final paste() function call at end of script.
     
-    time <- unlist(strsplit(filename, "_"))[3]
+    
+    #### Extracting filename information with flexibility
+    
+    ## Season can be extracted from the parent folder.  Use if/else if/else statement to check for early, peak, late within the parent folder name to indicate season.
+    
+    parent_folder_path <- getwd()
+    
+    parent_folder <- tolower(unlist(strsplit(x = parent_folder_path, split = "/"))[length(unlist(x = strsplit(parent_folder_path, split ="/")))])
+    
+    parent_folder_unlist <- unlist(strsplit(x = parent_folder, split = c("[, ]+")))
+    
+    if("early" %in% parent_folder_unlist){
+      season <- "early"
+    }else if("peak" %in% parent_folder_unlist){
+      season <- "peak"
+    }else if("late" %in% parent_folder_unlist){
+      season <- "late"
+    }else{
+      season <- NA
+    }
+    
+    filename_unlist <- tolower(unlist(strsplit(x = filename, split = "_")))
+    
+    ## Now searching for date.  All filenames will have the date indicated by either a 6 or 8 digit number, and no other number pattern that long will exist.  (some may have entered the date with dashes).
+    date <- grep(pattern = "[0-9]{6}", x = filename_unlist, value = TRUE)
+    
+    # Adding 20 to year for 8 digit date.
+    date_unlist <- unlist(strsplit(x = date, split = ""))
+    if(length(date_unlist) == 6){
+      date <- paste(paste(paste(date_unlist[1:4], sep = "", collapse = ""), "20", sep = ""), paste(date_unlist[5:6], sep = "", collapse = ""), sep = "")
+    }
+    
+    ## Now searching for time.  this will be the day/night indicator also in the parent folder name.  just use that.
+    
+    if("day" %in% parent_folder_unlist){
+      time <- "day"
+    }else if("night" %in% parent_folder_unlist){
+      time <- "night"
+    }
     
     if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
       time <- paste(time, "resp", sep = "")
     }
     
-    print(data.frame("tstart" = tstart, "tfinish" = tfinish, "time" = time, "nee_lm" = nee_lm, "nee_exp" = nee_exp, "rsqd" = rsqd, "sigma" = sigma, "aic.lm" = aic.lm, "aic.nlm" = aic.nlm))
+    ## Now searching for the site.  Do this by writing a site list of all possible sites, and just checking for inclusion.
+    
+    site_list <- c("almont", "painterboy", "road", "pfeiler", "pfealer", "cbt", "almont", "pbm", "cinnamon", "lowermontane", "uppermontane", "lowersubalpine", "uppersubalpine")
+    
+    site <- filename_unlist[filename_unlist %in% site_list]
+    
+    
+    ## Now searching for the plot number.
+    plot <- grep(pattern = "[0-9a-z].txt", x = filename_unlist, value = TRUE)
+    ## there may an "a", "a.txt", "resp", or "resp.txt" indicator at the end of plot.  This is a common formatting error, and fixed with the following ifelse statements.
+    if(length(grep(pattern = "a.txt", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-4):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "resp.txt", x = plot, value = FALSE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-7):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "photo.txt", x = plot, value = FALSE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-8):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "a$", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-length(plot_unlist)]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "resp$", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-3):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "photo$", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-4):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }
+    
+    
+    print(data.frame("site" = site, "season" = season, "date" = date, "plot" = plot, "tstart" = tstart, "tfinish" = tfinish, "time" = time, "nee_lm" = nee_lm, "nee_exp" = nee_exp, "rsqd" = rsqd, "sigma" = sigma, "aic.lm" = aic.lm, "aic.nlm" = aic.nlm))
     replicate <- readline("Would you like to redo the fitting with \n a different time domain? (y/n)")
     if(replicate == "y"){
       nee.fit(filename)
     } else {
-      return(c(tstart,tfinish,time,camb,tav,pav,nee_lm,nee_exp,rsqd,sigma,aic.lm, aic.nlm))
+      return(c(site, season, date, plot, tstart,tfinish,time,camb,tav,pav,nee_lm,nee_exp,rsqd,sigma,aic.lm, aic.nlm))
     }
   }
   
@@ -177,12 +252,12 @@ nee.calc <- function(){
   }
   
   stats.df <- as.data.frame(stats.df)
-  names.vec <- c("tstart", "tfinish", "time", "camb", "tav", "pav", "nee_lm", "nee_exp", "LM rsqd", "non-linear sigma", "aic_lm", "aic_nlm")
+  names.vec <- c("site", "season", "date", "plot","tstart", "tfinish", "time", "camb", "tav", "pav", "nee_lm", "nee_exp", "LM rsqd", "non-linear sigma", "aic_lm", "aic_nlm")
   for(i in 1:length(names.vec)){
     names(stats.df)[i] <- names.vec[i]
   }
 
 stats.df
-write.csv(stats.df, file = paste(paste(strsplit(getwd(), "/")[[1]][length(strsplit(getwd(), "/")[[1]])], "summary", sep = " "), ".csv", sep = ""))
+write.csv(stats.df, file = paste(paste(strsplit(getwd(), "/")[[1]][length(strsplit(getwd(), "/")[[1]])], "NEE", "summary", sep = " "), ".csv", sep = ""))
 
 }

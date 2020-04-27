@@ -1,4 +1,4 @@
-et.calc <- function(){
+et_calc <- function(){
   ### This function is meant to perform a linear and non-linear fitting of h2o absorpotion data from LiCOR machines to provide estimates of evapotranspiraiton.  It is modeled off of a previous function designed to perform similar fitting of co2 data to estimate net ecosystem exchange.  The nee.calc code still exists as a future step will be to integrate these two fits to be performed simultaneously (the nee.fit function assumes that h20 remains constant).  All comments from previous version/s are maintained.
   
   ### Transpiration is only plants when stomata are open (daytime measurements).  Evapotranspiration is everything, plants and soils (daytime measurements), and evaporation is only soils, (nighttime or dark/respiration measurements).  Thus, we are measuring, directly, only evapotranspiration (ET) and evaporation (E).  But, we can extract Transpiration as ET = E + T (see Wang et al.).  Some report T/ET ratios.  Our estimates appear reasonable with others reported by Wang et al. and Burba et al.  Do see Wang et al.'s review paper for comments on reliability of nightime measurements as proxy for evaporation.  Specifically, he quotes studies that found measurable non-zero transpiration during plant respiration.
@@ -18,29 +18,29 @@ et.calc <- function(){
   ## Define directory as an object that contains the dir() item names as a vector.
   directory <- dir()
   
-  ## For reading the .txt files, replace the ".txt" paste with ".txt"
-  #   photo.names <- directory[grep(paste("[0-9]", ".txt", sep = ""), dir(), ignore.case = TRUE, value = FALSE)]
-  #   ambient.names <- directory[grep(paste("[0-9]", "a", ".txt", sep = ""), dir(), ignore.case = TRUE, value = FALSE)]
-  #   resp.names <- directory[grep("resp", dir(), ignore.case = TRUE, value = FALSE)]
-  
+  ## Identify all file names corresponding to photosynthesis and respiration measurements
   photo.names <- grep("[^resp].txt", grep("[^_a]\\.txt", dir(), value = TRUE), value = TRUE)
   ambient.names <- grep("a.txt", dir(), value = TRUE)
-  resp.names <- grep("_[[:digit:]]resp.txt", dir(), value = TRUE)
+  resp.names <- grep("resp.txt", dir(), value = TRUE)
   
   et.fit <- function(filename){
     ## For reading the .txt files, replace read.csv with read.table, and add a skip = 9 parameter to the function.
     input <- read.table(filename, header = FALSE, skip = 9)
-    ## For reading the .txt files, these input subsetting commands may not be necessary.
-    #     input <- input[-1,]
-    #     input <- input[,-1]
     
-    if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
-      ambient <- read.table(paste(strsplit(filename, "resp.txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
-    } else{
-      ambient <- read.table(paste(strsplit(filename, ".txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+    ## If statement to load ambient file if measurement was made (2006 and on) or to calculate ambient from the first five seconds of the photosyntheis/respriation measurement (2003-2006)
+    if(length(ambient.names) >= 1){
+      if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
+        ambient <- read.table(paste(strsplit(filename, "resp.txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+      }else if(length(grep("photo", filename, ignore.case = TRUE, value = FALSE)) == 1){
+        ambient <- read.table(paste(strsplit(filename, "photo.txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+      }else{
+        ambient <- read.table(paste(strsplit(filename, ".txt"), "a.txt", sep = ""), header = FALSE, skip = 9)
+      }
+    }else{
+      # grab first five rows of input file for ambient, keep all columns to use same averaging code below for wamb measure.
+      ambient <- input[1:5,]
     }
-    #     ambient <- ambient[,-1]
-    #     ambient <- ambient[-1,]
+    
     
     #  /// define constants - for Enquist Tent///
     vol = 2.197   # m^3, tent volume
@@ -67,12 +67,12 @@ et.calc <- function(){
     
     wprime <- h2o/(1-(h2o/10**3)) #dilution correction for gas mixture
     
-    wamb <- mean(as.numeric(as.character(ambient[,12]))) #average h2o at ambient for leaky fit model.
+    #ambient H2O measurement to determine if leak is occurring.
+    wamb <- mean(as.numeric(as.character(ambient[,12]))/(1-(as.numeric(as.character(ambient[,12]))/1000)))
     
     ## I think this is just the ideal gas law, but not clear to me why ideal gaw law is necessary for converting from whatever the old units were (find out and enter) to the new units.  The 18 represents the molar mass of H2O, 18 grams/mole.
     
-    wamb <- wamb*R*(tav+273.15)/(18*pav)    # change to mmol/mol or ppm, or grams per mol?
-    # camb
+    # wamb <- wamb*R*(tav+273.15)/(18*pav)  # change to umol/mol or ppm  The conversion is not justified, and appears to cause large deviations in NEE values.
     
     #  /// Plotting the H20 vs. Time Curve //
     
@@ -148,13 +148,96 @@ et.calc <- function(){
     curve((wnot - Wss)*exp(-(x-time[tstart])/tau) + Wss, col = 4, add = TRUE)	#equation 3 in Saleska 1999 to plot for visual inspection.##
 
     
-    time <- "Evapotranspiration"
+    # need 'time' variable for day or night, preferably time of day too, (though consider as separate column).
+    # time <- "Evapotranspiration"
+    # if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
+    #   time <- "Evaporation"
+    # }
     
-    if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
-      time <- "Evaporation"
+    
+    #### Extracting filename information with flexibility
+    ## Format should be site_season_time_date_plot.
+    
+    ## Season can be extracted from the parent folder.  Use if/else if/else statement to check for early, peak, late within the parent folder name to indicate season.
+    
+    parent_folder_path <- getwd()
+    
+    parent_folder <- tolower(unlist(strsplit(x = parent_folder_path, split = "/"))[length(unlist(x = strsplit(parent_folder_path, split ="/")))])
+    
+    parent_folder_unlist <- unlist(strsplit(x = parent_folder, split = c("[, ]+")))
+    
+    if("early" %in% parent_folder_unlist){
+      season <- "early"
+    }else if("peak" %in% parent_folder_unlist){
+      season <- "peak"
+    }else if("late" %in% parent_folder_unlist){
+      season <- "late"
+    }else{
+      season <- NA
     }
     
-    print(data.frame("tstart" = tstart, "tfinish" = tfinish, "time" = time, "flux_lm" = flux_lm, "flux_nlm" = flux_exp, "rsqd" = rsqd, "nlm_sigma" = sigma, "aic.lm" = aic.lm, "aic.nlm" = aic.nlm))
+    filename_unlist <- tolower(unlist(strsplit(x = filename, split = "_")))
+    
+    ## Now searching for date.  All filenames will have the date indicated by either a 6 or 8 digit number, and no other number pattern that long will exist.  (some may have entered the date with dashes).
+    date <- grep(pattern = "[0-9]{6}", x = filename_unlist, value = TRUE)
+    
+    # Adding 20 to year for 8 digit date.
+    date_unlist <- unlist(strsplit(x = date, split = ""))
+    if(length(date_unlist) == 6){
+      date <- paste(paste(paste(date_unlist[1:4], sep = "", collapse = ""), "20", sep = ""), paste(date_unlist[5:6], sep = "", collapse = ""), sep = "")
+    }
+    
+    ## Now searching for time.  this will be the day/night indicator also in the parent folder name.  just use that.
+    
+    if("day" %in% parent_folder_unlist){
+      time <- "day"
+    }else if("night" %in% parent_folder_unlist){
+      time <- "night"
+    }
+    
+    if(length(grep("resp", filename, ignore.case = TRUE, value = FALSE)) == 1){
+      time <- paste(time, "evaporation", sep = "_")
+    }else{
+      time <- paste(time, "evapotranspiration", sep = "_")
+    }
+    
+    ## Now searching for the site.  Do this by writing a site list of all possible sites, and just checking for inclusion.
+    
+    site_list <- c("almont", "painterboy", "road", "pfeiler", "pfealer", "cbt", "almont", "pbm", "cinnamon", "lowermontane", "uppermontane", "lowersubalpine", "uppersubalpine")
+    
+    site <- filename_unlist[filename_unlist %in% site_list]
+    
+    ## Now searching for the plot number.
+    plot <- grep(pattern = "[0-9a-z].txt", x = filename_unlist, value = TRUE)
+    ## there may an "a", "a.txt", "resp", or "resp.txt" indicator at the end of plot.  This is a common formatting error, and fixed with the following ifelse statements.
+    if(length(grep(pattern = "a.txt", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-4):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "resp.txt", x = plot, value = FALSE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-7):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "photo.txt", x = plot, value = FALSE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-8):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+      }else if(length(grep(pattern = "a$", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-length(plot_unlist)]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "resp$", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-3):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }else if(length(grep(pattern = "photo$", x = plot, value = TRUE)) == 1){
+      plot_unlist <- unlist(strsplit(x = plot, split = ""))
+      plot_unlist <- plot_unlist[-c((length(plot_unlist)-4):length(plot_unlist))]
+      plot <- paste(plot_unlist, sep = "", collapse = "")
+    }
+    
+    
+    print(data.frame("site" = site, "season" = season, "date" = date, "plot" = plot, "tstart" = tstart, "tfinish" = tfinish, "time" = time, "flux_lm" = flux_lm, "flux_nlm" = flux_exp, "rsqd" = rsqd, "nlm_sigma" = sigma, "aic.lm" = aic.lm, "aic.nlm" = aic.nlm))
     # comment/uncomment to use print statement for including non-linear fitting with aic scores
     # print(data.frame("tstart" = tstart, "tfinish" = tfinish, "time" = time, "flux_lm" = flux_lm, "flux_exp" = flux_exp, "rsqd" = rsqd, "sigma" = sigma, "aic.lm" = aic.lm, "aic.nlm" = aic.nlm))
     
@@ -162,7 +245,7 @@ et.calc <- function(){
     if(replicate == "y"){
       et.fit(filename)
     } else {
-      return(c(tstart,tfinish,time,wamb,tav,pav,cav,flux_lm,flux_exp,rsqd,sigma,aic.lm,aic.nlm))
+      return(c(site, season, date, plot, tstart,tfinish,time,wamb,tav,pav,cav,flux_lm,flux_exp,rsqd,sigma,aic.lm,aic.nlm))
       # comment/uncomment to use print statement for including non-linear fitting with aic scores
       # return(c(tstart,tfinish,time,wamb,tav,pav,cav,flux_lm,flux_exp,rsqd,sigma,aic.lm, aic.nlm))
     }
@@ -185,7 +268,7 @@ et.calc <- function(){
   }
   
   stats.df <- as.data.frame(stats.df)
-  names.vec <- c("tstart", "tfinish", "time", "wamb", "tav", "pav", "cav", "flux_lm", "flux_nlm", "LM rsqd", "non-linear sigma", "aic_lm", "aic_nlm")
+  names.vec <- c("site", "season", "date", "plot","tstart", "tfinish", "time", "wamb", "tav", "pav", "cav", "flux_lm", "flux_nlm", "LM rsqd", "non-linear sigma", "aic_lm", "aic_nlm")
   # comment/uncomment to use print statement for including non-linear fitting with aic scores
   # names.vec <- c("tstart", "tfinish", "time", "wamb", "tav", "pav", "cav", "flux_lm", "flux_exp", "LM rsqd", "non-linear sigma", "aic_lm", "aic_nlm")
   for(i in 1:length(names.vec)){
@@ -193,6 +276,6 @@ et.calc <- function(){
   }
   
   stats.df
-  write.csv(stats.df, file = paste(paste(strsplit(getwd(), "/")[[1]][length(strsplit(getwd(), "/")[[1]])], "summary", sep = " "), ".csv", sep = ""))
+  write.csv(stats.df, file = paste(paste(strsplit(getwd(), "/")[[1]][length(strsplit(getwd(), "/")[[1]])], "ET", "summary", sep = " "), ".csv", sep = ""))
   
 }
